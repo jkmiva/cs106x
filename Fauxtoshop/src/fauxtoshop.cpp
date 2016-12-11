@@ -3,6 +3,8 @@
 // TODO: rewrite this comment
 
 #include <iostream>
+#include <cstdlib>
+#include <algorithm>
 #include "console.h"
 #include "gwindow.h"
 #include "grid.h"
@@ -27,7 +29,7 @@ static void     getMouseClickLocation(int &row, int &col);
  *
  * TODO: rewrite this comment.
  */
-void scatter (GBufferedImage & img, Grid<int> & grid, int radius){
+void scatter (GBufferedImage& img, const Grid<int>& grid, int radius){
     Grid<int> dup = grid;
     int numCols = grid.numCols();
     int numRows = grid.numRows();
@@ -42,6 +44,65 @@ void scatter (GBufferedImage & img, Grid<int> & grid, int radius){
             ranRow=numRows;
             ranCol=numCols;
         }
+    img.fromGrid(dup);
+}
+
+bool colorDiff(GBufferedImage& img, const Grid<int>& grid, int row, int col, int threhold) {
+    int red, green, blue;
+    int mred, mgreen, mblue;
+    img.getRedGreenBlue(grid[row][col], mred, mgreen, mblue);
+    for (int i = -1; i <= 1; i++) {
+        for (int j = -1; j <= 1; j++) {
+            if (grid.inBounds(row+i, col+j)) {
+                img.getRedGreenBlue(grid[row+i][col+j], red, green, blue);
+                if (max(abs(mred-red),max(abs(mgreen-green), abs(mblue-blue))) > threhold)
+                    return true;
+            }
+        }
+    }
+    return false;
+}
+
+void edge (GBufferedImage& img, const Grid<int>& grid, int threhold){
+    Grid<int> dup = grid;
+    int numCols = grid.numCols();
+    int numRows = grid.numRows();
+    for (int r = 0; r < numRows; r++) {
+        for (int c = 0; c < numCols; c++) {
+            if (colorDiff(img, grid, r, c, threhold)) {
+                dup[r][c] = BLACK;
+            } else {
+                dup[r][c] = WHITE;
+            }
+        }
+    }
+    img.fromGrid(dup);
+}
+
+
+bool isGreen(GBufferedImage& img, Grid<int>& stkGrid, int row, int col, int threhold) {
+    int red, green, blue, red1, green1, blue1;
+    img.getRedGreenBlue(GREEN,red,green,blue);
+    img.getRedGreenBlue(stkGrid[row][col],red1,green1,blue1);
+    if (max(abs(red-red1),max(abs(green-green1), abs(blue-blue1))) <= threhold)
+        return true;
+    else
+        return false;
+}
+
+void greenScreen(GBufferedImage& img, Grid<int>& imgGrid, Grid<int>& stkGrid, int row, int col, int threhold) {
+    Grid<int> dup = imgGrid;
+    int numCols = stkGrid.numCols();
+    int numRows = stkGrid.numRows();
+    for (int i = 0; i < numRows; i++) {
+        for (int j = 0; j < numCols; j++) {
+            if (imgGrid.inBounds(row+i,col+j)) {
+                if (!isGreen(img,stkGrid,i,j,threhold)) {
+                    dup[row+i][col+j] = stkGrid[i][j];
+                }
+            }
+        }
+    }
     img.fromGrid(dup);
 }
 
@@ -60,9 +121,9 @@ int main() {
                 exit(0);
         }
         cout << "Opening img file, may take a minute..." << endl;
-        gw.setSize(img.getWidth(), img.getHeight());
-        gw.add(&img,0,0);
-        Grid<int> original = img.toGrid();
+        gw.setSize(img.getWidth(), img.getHeight());    // set size of windows canvas
+        gw.add(&img,0,0);   // add the real image
+        Grid<int> original = img.toGrid();  // convert img to grid<int> structure
 
         char choice;
         bool choiceValid = false;
@@ -78,10 +139,53 @@ int main() {
             case '1':
                 choiceValid = true;
                 int radius;
-                cout << "Please input a radius[1-100]:";
+                cout << "Enter degree of scatter [1-100]: ";
                 cin >> radius;
                 scatter (img,original,radius);
                 break;
+            case '2':
+                choiceValid = true;
+                int threhold;
+                cout << "Enter threhold for edge detection: ";
+                cin >> threhold;
+                edge(img,original,threhold);
+                break;
+            case '3': {
+                cin.clear();
+                cin.ignore(10000, '\n');
+                choiceValid = true;
+                int threhold2;
+                string stkName;
+                string location;
+                int srow = -1, scol = -1;
+                char a, b;
+                GBufferedImage stkImg;
+                cout << "Now choose another file to add to your background file." << endl;
+                while (!openImageFromFilename(stkImg, stkName)) {
+                    cout << "Enter name of sticker image file to open: ";
+                    getline(cin,stkName);
+                }
+                cout << "Opening sticker img file, may take a minute..." << endl;
+                Grid<int> stkGrid = stkImg.toGrid();
+                cout << "Enter tolerence threhold:";
+                cin >> threhold2;
+                cin.clear();
+                cin.ignore(10000, '\n');
+                while (srow < 0 && scol < 0) {
+                    cout << "Enter location to place the sticker img as \"(row,col)\" (or blank to use mouse):";
+                    getline(cin,location);
+                    if (location != "") {
+                        stringstream ss(location);
+                        ss >> a >> srow >> b >> scol;
+                    } else {
+                        getMouseClickLocation(srow, scol);
+                    }
+                    cout << endl << "Get location: (" << srow << ", " << scol << ")." << endl;
+                }
+                greenScreen(img,original,stkGrid,srow,scol,threhold2);
+                cout << "Press Enter...";
+                break;
+            }
             default:
                 cout << "Invalid choice.Please choose again." << endl;
                 break;
@@ -98,6 +202,9 @@ int main() {
             if (saveImageToFilename(img,saveImg))
                 break;
         }
+        // clear and repeat
+        gw.clear();
+        cout << endl;
     }
 //    int row, col;
 //    getMouseClickLocation(row, col);
